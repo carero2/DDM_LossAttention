@@ -6,24 +6,34 @@ library(rlang)
 # Set working directory to source file location
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
-read_and_clean <- function(file = "Study1cleaned_df.csv",
-                           remove_basedOnRT = TRUE,
-                           remove_outliers_rt = FALSE,
-                           column_rt = "duration",
-                           column_participants = "subject_id",
-                           remove_participants = c(),
-                           var_block = "block",
-                           transform_log=FALSE) {
+read_and_clean <- function(file,                                # csv file to read
+                           remove_basedOnRT = TRUE,             # whether to remove trials with too quick or too slow responses
+                           remove_outliers_rt = FALSE,          # Whether to remove outliers trials based on RT
+                           column_rt = "duration",              # specify rt column
+                           remove_outliers_performance = TRUE,  # whether to remove participants with an outlier performance
+                           column_performance = "maximized_option",   # Specify performance column
+                           column_participants = "subject_id",  # specify participants column
+                           remove_participants = c(),           # specific participants to remove
+                           var_block = "block",                 # specify block variable (where practice is equal to 0)
+                           transform_log=FALSE) {               # whether to transform RT to log
   # Read
   df <- read.csv(file)
   
   # Remove practice block
-  df <- df[df[var_block] != 0,]
+  df <- df[df[[var_block]] != 0,]
   
+  
+  # Remove outliers in response time
   if (remove_outliers_rt){
-    df <- remove_outliers(df, column_outiers = column_rt)
+    df <- remove_rt_outliers(df, column_outiers = column_rt)
   }
   
+  # Remove outliers in performance
+  if (remove_outliers_performance){
+    df <- remove_performance_outliers(df, column_participants, column_performance)
+  }
+  
+  # Remove based on RT, keep only responses between 250ms and 3500ms
   if (remove_basedOnRT){
     # Save sizes and remove trials
     original_size <<- nrow(df)
@@ -37,22 +47,27 @@ read_and_clean <- function(file = "Study1cleaned_df.csv",
       paste0(
         removed_trials,
         " trials have been removed based on RT. This is a %",
-        removed_trials / original_size * 100
+        round(removed_trials / original_size * 100, 3)
       )
     )
   } else{
     print("No trials have been removed based on RT.")
   }
   
+  # Remove specific participants specified in remove_participants parameter
   if (length(remove_participants) != 0){
     to_keep <- !pull(df, column_participants) %in% remove_participants
     df <- df[to_keep, ]
     print(paste0("Removed ", length(remove_participants), " participants: ", paste0(remove_participants, collapse=",")))
   }
-
+  
+  # Convert response time from ms to seconds
   df$duration_secs <- round((df$duration/1000), 5)
   
+  # reset index
   rownames(df) <- NULL
+  
+  # Log transform response time variable
   if (transform_log){
     df["RT_transformed"] <- log10(df["duration"])
   }
@@ -61,7 +76,8 @@ read_and_clean <- function(file = "Study1cleaned_df.csv",
   return(df)
 }
 
-remove_outliers <- function(df, column_outiers="duration"){
+# Remove trials outliers based on 1.5 IQR in response time
+remove_rt_outliers <- function(df, column_outliers="duration"){
   
   # Check and remove outliers (1.5 IQR)
   column <- as.numeric(unlist(df1[column_name]))
@@ -74,7 +90,7 @@ remove_outliers <- function(df, column_outiers="duration"){
     print(paste0(length(out), 
                  " outliers have been removed from dataset. Thus ",
                  removed_trials, " trials have been eliminated. This is a %",
-                 removed_trials/original_size*100))
+                 round(removed_trials/original_size*100, 3)))
   } else{
     print("There are no outliers in dataset.")
   }
@@ -82,7 +98,42 @@ remove_outliers <- function(df, column_outiers="duration"){
   return(df)
 }
 
-# Read, remove trials based on RT and log transform RT
+remove_performance_outliers <- function(df,
+                                        column_participants,
+                                        column_performance){
+  aggregated <- as.data.frame(df %>%
+                                 group_by((!!sym(column_participants))) %>%
+                                 summarize(prop_correct = mean((!!sym(column_performance))))
+                                 )
+  
+  boxplot(aggregated$prop_correct,
+          ylab="Proportion",
+          main = "Proportion of correct"
+  )
+  out <- boxplot.stats(aggregated$prop_correct)$out
+  
+  
+  
+  if (length(out)>0) {
+    out_ind <- which(aggregated$prop_correct %in% c(out))
+    participants_outlier <- aggregated[out_ind, column_participants]
+    mtext(paste("Participant outliers: ", paste(participants_outlier, collapse = ", ")))
+    
+    print(paste0(length(out), 
+                 " participants have been removed for being outliers in performance from dataset. ",
+                 "Thus, our final sample is composed of ", 
+                 length(unique(df[!(df[column_participants] %in% participants_outlier), column_participants])),
+                 " participants. "))
+  } else{
+    print("There are no outliers in dataset.")
+  }
+  
+  return(df[!(df[column_participants] %in% participants_outlier), ])
+}
+
+
+
+# Apply to Study 1
 df1 <- read_and_clean(file = "Study1cleaned_df.csv",
                       remove_basedOnRT= TRUE,
                       remove_outliers_rt = FALSE,
@@ -92,49 +143,43 @@ df1 <- read_and_clean(file = "Study1cleaned_df.csv",
                       transform_log=FALSE)
 
 
-# Repeat for Study 2
+# Study 2
 df2 <- read_and_clean(file = "Study2cleaned_df.csv",
-                      remove_basedOnRT= TRUE,
-                      remove_outliers = FALSE,
-                      column_participants = "subject_id",
-                      remove_participants = c(),
-                      var_block = "block_order",
+                      remove_basedOnRT = TRUE, 
+                      remove_outliers_rt = FALSE,
+                      column_rt = "duration",
+                      remove_outliers_performance = TRUE, 
+                      column_performance = "maximized_option",
+                      column_participants = "subject_id", 
+                      remove_participants = c(), 
+                      var_block = "block_order", 
                       transform_log=FALSE)
 
-
-aggregated2 <- as.data.frame(df2 %>%
-                              group_by(subject_id) %>%
-                              summarize(prop_correct = round(mean(maximized_option), 2)
-                              ))
-
-boxplot(aggregated2$prop_correct,
-        ylab="Proportion",
-        main = "Proportion of correct in pure domains"
-)
-out <- boxplot.stats(aggregated2$prop_correct)$out
-out_ind <- which(aggregated2$prop_correct %in% c(out))
-participants_outlier <- aggregated2[out_ind, "subject_id"]
-mtext(paste("Participant outliers: ", paste(participants_outlier, collapse = ", ")))
-
-
-df2 <- df2[!(df2$subject_id %in% participants_outlier), ]
-length(unique(df2$subject_id))
 
 
 # Study 3
 df3 <- read_and_clean(file = "Study3cleaned_df.csv",
+                      column_rt = "duration",
                       remove_basedOnRT= TRUE,
+                      remove_outliers_rt = FALSE,
+                      remove_outliers_performance = FALSE, 
+                      column_performance = "correct",
                       var_block = "block_order",
+                      column_participants = "participant_id", 
                       transform_log=FALSE)
 
+# For study 3 we want to remove outlier participants only based on the pure domains (where no risk preferences are involved)
+# Thats why we remove the participants manually:
 
 df3$pure_domain <- ifelse(substr(df3$domain, 0, 4) == "pure", 1, 0)
 
 aggregated3 <- as.data.frame(df3 %>%
                               filter(pure_domain == 1)  %>%
-                              group_by(participant_id) %>%
-                              summarize(prop_correct = round(mean(correct), 2)
+                              group_by((!!sym("participant_id"))) %>%
+                              summarize(prop_correct = round(mean((!!sym("correct"))), 2)
                               ))
+
+
 
 boxplot(aggregated3$prop_correct,
         ylab="Proportion",
@@ -147,7 +192,11 @@ mtext(paste("Participant outliers: ", paste(participants_outlier, collapse = ", 
 
 
 df3 <- df3[!(df3$participant_id %in% participants_outlier), ]
-length(unique(df3$participant_id))
+print(paste0(length(out), 
+             " participants have been removed for being outliers in performance from dataset. ",
+             "Thus, our final sample is composed of ", 
+             length(unique(df3[!(df3$participant_id %in% participants_outlier), "participant_id"])),
+             " participants. "))
 
 
 
@@ -156,6 +205,7 @@ length(unique(df3$participant_id))
 
 ##### CREATE PARTICIPANT FILES
 
+# This function creates al the participants files used by fast-dm.exe to fit the models
 create_participants_DDM <- function(df,
                                     participant_column="subject_id",
                                     columns_keep){
@@ -172,8 +222,8 @@ create_participants_DDM <- function(df,
   }
 }
 
-getwd()
-setwd("DDM/Study 1/")
+# Move to Study 1 where we will create the files
+setwd("Study 1/")
 create_participants_DDM(df1, participant_column="subject_id",
                         c("maximized_option",
                           "duration_secs",
@@ -185,10 +235,8 @@ create_participants_DDM(df1, participant_column="subject_id",
 # Return to source file location
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
-
-
-
-setwd("DDM/Study 2/")
+# Move to Study 2
+setwd("Study 2/")
 create_participants_DDM(df2,
                         participant_column="subject_id",
                         c("maximized_option",
@@ -199,9 +247,8 @@ create_participants_DDM(df2,
 
 # Return to source file location
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-
-
-setwd("DDM/Study 3/pure_domains")
+# Move to Study 3 pure domains
+setwd("Study 3/pure_domains")
 create_participants_DDM(df3[df3$domain %in% c("pure_mixed", "pure_gain", "pure_loss"),],
                         participant_column = "participant_id",
                         c("correct",
@@ -212,9 +259,8 @@ create_participants_DDM(df3[df3$domain %in% c("pure_mixed", "pure_gain", "pure_l
 
 # Return to source file location
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-
-
-setwd("DDM/Study 3/mixed_domains")
+# Move to Study 3 mixed domains
+setwd("Study 3/mixed_domains")
 create_participants_DDM(df3[df3$domain %in% c("mixed_loss", "mixed_gain"),],
                         participant_column = "participant_id",
                         c("correct",
@@ -224,16 +270,15 @@ create_participants_DDM(df3[df3$domain %in% c("mixed_loss", "mixed_gain"),],
 
 
 ##### CREATE THE MODELS (you should have created a models_StudyX.csv to specify which models you want to create)
-
-setwd("DDM")
-create_models <- function(study="Study 1",
+# This function will create all the models.ctl files that are used by fast-dm.exe to specify all the parameters of the model to be trained
+create_models <- function(models_csv="models_Study1.csv",
                           format="RESPONSE TIME condition difficulty"){
   
-  df <- read.csv(paste0("models_", gsub(" ", "", study), ".csv"), row.names=NULL, sep=";")
+  df <- read.csv(models_csv, row.names=NULL, sep=";")
   df <- subset(df, select = -c(model, p))
   
   for (row in 1:nrow(df)){
-    sink(paste0("./", study, "/model", row, ".ctl"))
+    sink(paste0("./model", row, ".ctl"))
     cat(paste0("# Model ", row), "\n")
     cat(paste0("method ml", "\n", "precision 3", "\n"))
     for (column in rev(colnames(df))){
@@ -258,47 +303,64 @@ create_models <- function(study="Study 1",
   }
 }
 
+# Return to source file location
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# Move to Study 1
+setwd("Study 1/")
 # Create models for Study 1
-create_models(study="Study 1")
+create_models(models_csv="models_Study1.csv")
 
+
+# Return to source file location
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# Move to Study 2
+setwd("Study 2/")
 # Create models for Study 2
-create_models(study="Study 2")
+create_models(models_csv="models_Study2.csv")
 
-# Create models for Study 3 (for mixed and pure domains are the same models)
-create_models(study="Study 3", format= "RESPONSE TIME condition")
+# Return to source file location
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# Move to Study 3
+setwd("Study 3/")
+# Create models for Study 3 (for mixed and pure domains are the same models, I recommend moving the files to the folders after creating them)
+create_models(models_csv="models_Study3.csv", format= "RESPONSE TIME condition")
 
 
 
 ##### RUN DDM
 
-n_models <- 9
 
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 setwd("Study 1")
+n_models <- length(list.files(path = "./", pattern = "*.ctl"))
 for (model in 1:n_models) {
   system(paste0("fast-dm model",
                 model, ".ctl"))
 }
 
 
-# Return to source file location
+# Study 2
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-setwd("DDM/Study 2")
+setwd("Study 2")
+n_models <- length(list.files(path = "./", pattern = "*.ctl"))
 for (model in 1:n_models) {
   system(paste0("fast-dm model",
                 model, ".ctl"))
 }
 
-# Return to source file location
+# Study 3 pure domains
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-setwd("DDM/Study 3/mixed_domains")
+setwd("Study 3/mixed_domains")
+n_models <- length(list.files(path = "./", pattern = "*.ctl"))
 for (model in 1:n_models) {
   system(paste0("fast-dm model",
                 model, ".ctl"))
 }
 
-# Return to source file location
+# Study 3 mixed domains
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-setwd("DDM/Study 3/pure_domains")
+setwd("Study 3/mixed_domains")
+n_models <- length(list.files(path = "./", pattern = "*.ctl"))
 for (model in 1:n_models) {
   system(paste0("fast-dm model",
                 model, ".ctl"))
@@ -318,9 +380,9 @@ library("dplyr")
 
 
 read_analyzed_models <- function(study_path="Study 1"){
-  # Return to source file location
+  # Return to source file location and go to specified path
   setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-  setwd(paste0("DDM/DDM_LossAttention/", study_path))
+  setwd(study_path)
   
   models <- list.files(path = "./", pattern = "*.log")
   n_participants <- length(list.files(path = "./", pattern = "*.txt"))
@@ -352,7 +414,7 @@ read_analyzed_models <- function(study_path="Study 1"){
   return(df_models)
 }
 
-get_best_models <- function(df, study = "Study 2"){
+get_best_models <- function(df, study){
   
   print(paste0("Table has results from ",
              length(unique(df$participant)), " participants and ",
