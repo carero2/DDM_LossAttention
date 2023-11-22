@@ -1,8 +1,15 @@
+########
+######## This code is provided to perform all the DDM analysis from a Windows pc. If you want to run this from a mac
+######## you won't be able to run the models calling the fast-dm.exe from this code, but you will be able to create
+######## participant files, models files, read models results and plot models results.
+########
+
+
 library(dplyr)
 library(rlang)
 
 
-##### READ AND CLEAN DATA
+##### READ AND CLEAN DATA from csv data
 # Set working directory to source file location
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
@@ -289,6 +296,9 @@ create_models <- function(models_csv="models_Study1.csv",
         if (df[row, column] == "C, D"){
           cat(paste0("depends ", column, " condition difficulty"), "\n")
         }
+        if (df[row, column] == "D"){
+          cat(paste0("depends ", column, " difficulty"), "\n")
+        }
         
       } else{
         if (df[row, column] != "-"){
@@ -321,8 +331,13 @@ create_models(models_csv="models_Study2.csv")
 # Return to source file location
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 # Move to Study 3
-setwd("Study 3/")
-# Create models for Study 3 (for mixed and pure domains are the same models, I recommend moving the files to the folders after creating them)
+setwd("Study 3/pure_domains")
+# Create models for Study 3 pure domains
+create_models(models_csv="models_Study3.csv", format= "RESPONSE TIME condition")
+
+# Move to Study 3 mixed domains
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+setwd("Study 3/mixed_domains")
 create_models(models_csv="models_Study3.csv", format= "RESPONSE TIME condition")
 
 
@@ -330,9 +345,14 @@ create_models(models_csv="models_Study3.csv", format= "RESPONSE TIME condition")
 ##### RUN DDM
 
 
+
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 setwd("Study 1")
+
+
 n_models <- length(list.files(path = "./", pattern = "*.ctl"))
+
+# If you only want to run some models, you have to change the 1:n_models to a vector of the desired models to analyze, ex. c(9, 10, 11)
 for (model in 1:n_models) {
   system(paste0("fast-dm model",
                 model, ".ctl"))
@@ -350,7 +370,7 @@ for (model in 1:n_models) {
 
 # Study 3 pure domains
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-setwd("Study 3/mixed_domains")
+setwd("Study 3/pure_domains")
 n_models <- length(list.files(path = "./", pattern = "*.ctl"))
 for (model in 1:n_models) {
   system(paste0("fast-dm model",
@@ -375,14 +395,17 @@ for (model in 1:n_models) {
 library("readr")
 library("stringr")
 library("dplyr")
+library("R.utils")
 
 
 
 
-read_analyzed_models <- function(study_path="Study 1"){
+read_analyzed_models <- function(study_folder="Study 2"){
+  
   # Return to source file location and go to specified path
   setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-  setwd(study_path)
+  setwd(study_folder)
+  
   
   models <- list.files(path = "./", pattern = "*.log")
   n_participants <- length(list.files(path = "./", pattern = "*.txt"))
@@ -395,7 +418,17 @@ read_analyzed_models <- function(study_path="Study 1"){
     df_model <- read_log(model, col_names = TRUE, show_col_types=FALSE)
     names(df_model)[1] <- "participant"
     
-    df_model$BIC <- df_model$fit * 2 + (ncol(df_model) - 5) * log(nrow(df_model))
+    # Initiate the new column
+    df_model$n_trials <- 0
+    
+    # Replace the 0 for the number of trials per participant
+    for (participant in df_model$participant) {
+      n_trials_participant <- countLines(paste0(participant, ".txt"))
+      df_model[df_model$participant == participant, "n_trials"] <- n_trials_participant
+    }
+  
+    # If the ML method is chosen the presented fit index is -LL (Voss, Voss and Lerche, 2015)
+    df_model$BIC <- 2*df_model$fit + (ncol(df_model) - 6) * log(df_model$n_trials)
     
     model_str <- str_extract(model, '.*(?=\\.log)')
     df_model$model_variant <- model_str
@@ -411,14 +444,17 @@ read_analyzed_models <- function(study_path="Study 1"){
     cat("Less participants than expected in models ", models_less_participants, "\n", sep="\t")
     print(paste0(n_participants, " participants expected. ", nrow(df_model), " participants included."))
   }
+  
   return(df_models)
 }
 
-get_best_models <- function(df, study){
+get_best_models <- function(df, models_csv){
+  
+  n_models <-  length(unique(df$model_variant))
   
   print(paste0("Table has results from ",
              length(unique(df$participant)), " participants and ",
-             length(unique(df$model_variant)), " models."))
+             n_models, " models."))
 
   
   
@@ -429,7 +465,7 @@ get_best_models <- function(df, study){
   
   aggregated_best_models <- df %>%
     group_by(model) %>%
-    summarize(n_participants = n()/9)
+    summarize(n_participants = n()/n_models)
   
   aggregated_models <- df %>% select(-c(model)) %>%
     rename(model = model_variant) %>%
@@ -442,10 +478,8 @@ get_best_models <- function(df, study){
   
   aggregated_models <- merge(aggregated_models, aggregated_best_models)
   
-  
-  setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-  setwd("DDM//DDM_LossAttention/")
-  models <- read.csv2(paste0("models_", gsub(" ", "", study), ".csv"))
+
+  models <- read.csv2(models_csv)
   models$model <- paste0("model", models$model)
   final_aggregated <- merge(aggregated_models, models)
   
@@ -455,31 +489,53 @@ get_best_models <- function(df, study){
                  " because ", max(aggregated_models$n_participants),
                  " out of ", sum(aggregated_models$n_participants), " participants had a lower BIC with that model."))
   }
+  # Return to source file location and go to specified path
+  setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+  
   return(final_aggregated)
-  }
-
-results_Study2 <- read_analyzed_models(study_path="Study 2")
-
-best_models_Study2 <- get_best_models(results_Study2, study = "Study 2")
-
-for (model in unique(results_Study3_pure$model_variant)) {
-  print(model)
-  print(mean(as.numeric(unlist(results_Study3_pure[results_Study3_pure$model_variant == model, "BIC"]))))
-  print(sd(as.numeric(unlist(results_Study3_pure[results_Study3_pure$model_variant == model, "BIC"]))))
-  print(median(as.numeric(unlist(results_Study3_pure[results_Study3_pure$model_variant == model, "BIC"]))))
 }
 
+get_mean_parameters <- function(results, best_models){
+  summary_models <- results[results$model_variant %in% best_models$model,] %>%
+    group_by(model_variant) %>%
+    select(-method, -participant, -n_trials) %>%
+    summarise_if(is.numeric, mean, na.rm = TRUE)
+  
+  return(summary_models)
+}
 
-results_Study3_pure <- read_analyzed_models(study_path="Study 3/pure_domains")
+results_Study2 <- read_analyzed_models(study_folder = "Study 2")
+best_models_Study2 <- get_best_models(results_Study2, models_csv="models_Study2.csv")
+final_parameters_Study2 <- get_mean_parameters(results_Study2, best_models_Study2)
 
-best_models_Study3_pure <- get_best_models(results_Study3_pure, study = "Study 3")
+# Lets save
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+setwd('Study 2')
+write.csv(best_models_Study2, "results_moldes_Study2.csv", row.names=FALSE)
+write.csv(final_parameters_Study2, "parameters_models_Study2.csv", row.names=FALSE)
 
-results_Study3_mixed <- read_analyzed_models(study_path="Study 3/mixed_domains")
+results_Study3_pure <- read_analyzed_models(study_folder="Study 3/pure_domains")
+best_models_Study3_pure <- get_best_models(results_Study3_pure, models_csv="models_Study3.csv")
+final_parameters_Study3_pure <- get_mean_parameters(results_Study3_pure, best_models_Study3_pure)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+setwd('Study 3/pure_domains')
+write.csv(best_models_Study3_pure, "results_moldes_Study3_pure.csv", row.names=FALSE)
+write.csv(final_parameters_Study3_pure, "parameters_models_Study3_pure.csv", row.names=FALSE)
 
-best_models_Study3_mixed <- get_best_models(results_Study3_mixed, study = "Study 3")
+results_Study3_mixed <- read_analyzed_models(study_folder="Study 3/mixed_domains")
+best_models_Study3_mixed <- get_best_models(results_Study3_mixed, models_csv="models_Study3.csv")
+final_parameters_Study3_mixed <- get_mean_parameters(results_Study3_mixed, best_models_Study3_mixed)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+setwd('Study 3/mixed_domains')
+write.csv(results_Study3_mixed, "results_moldes_Study3_mixed.csv", row.names=FALSE)
+write.csv(final_parameters_Study3_mixed, "parameters_models_Study3_mixed.csv", row.names=FALSE)
 
 
-library(ggplot2) 
+
+# Lets plot some results
+
+library("ggplot2")
+library("tidyr")
 
 plot_results_model <- function(df, model, parameters){
   # creating the modified dataframe
@@ -490,23 +546,24 @@ plot_results_model <- function(df, model, parameters){
     labs(x="Parameter value", title=paste0("Boxplot for parameters from ", model))
   
 }
-plot_results_model(results_Study3_pure, "model5", c('v_pure_mixed', 'v_pure_gain', 'v_pure_loss'))
 
-plot_results_model(results_Study3_mixed, "model6", c('t0_mixed_gain', 't0_mixed_loss'))
+# Plots for Study 2
+
+plot_results_model(results_Study2, model="model11", parameters=c('v_2', 'v_4', 'v_6'))
+
+plot_results_model(results_Study2, model="model15", parameters=c('t0_gain', 't0_loss', 't0_mixed'))
+
+# Plots for Study 3 pure domains
+
+plot_results_model(results_Study3_pure, model="model5", parameters=c('v_pure_mixed', 'v_pure_gain', 'v_pure_loss'))
+
+plot_results_model(results_Study3_pure, model="model5", parameters=c('t0_pure_mixed', 't0_pure_gain', 't0_pure_loss'))
 
 
+# Plots for Study 3 mixed domains
 
-plot_results_allModels <- function(df, parameters){
-  # creating the modified dataframe
-  data_mod <- df[, parameters] %>% pivot_longer(everything())
-  # creating a plot 
-  ggplot(data_mod) + 
-    geom_boxplot(aes(x=name, y=value, color=name)) +
-    labs(x="Parameter value", title=paste0("Boxplot for parameters from all models"))
-  
-}
+plot_results_model(results_Study3_mixed, model="model6", parameters=c('t0_mixed_gain', 't0_mixed_loss'))
 
-plot_results_allModels(results_Study3_pure,  c('v_pure_mixed', 'v_pure_gain', 'v_pure_loss'))
+plot_results_model(results_Study3_mixed, model="model6", parameters=c('v_mixed_gain', 'v_mixed_loss'))
 
-plot_results_allModels(results_Study3_mixed, c('v_mixed_gain', 'v_mixed_loss'))
 
