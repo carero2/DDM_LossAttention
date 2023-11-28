@@ -511,7 +511,7 @@ final_parameters_Study2 <- get_mean_parameters(results_Study2, best_models_Study
 # Lets save
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 setwd('Study 2')
-write.csv(best_models_Study2, "results_moldes_Study2.csv", row.names=FALSE)
+write.csv(best_models_Study2, "results_models_Study2.csv", row.names=FALSE)
 write.csv(final_parameters_Study2, "parameters_models_Study2.csv", row.names=FALSE)
 
 results_Study3_pure <- read_analyzed_models(study_folder="Study 3/pure_domains")
@@ -519,7 +519,7 @@ best_models_Study3_pure <- get_best_models(results_Study3_pure, models_csv="mode
 final_parameters_Study3_pure <- get_mean_parameters(results_Study3_pure, best_models_Study3_pure)
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 setwd('Study 3/pure_domains')
-write.csv(best_models_Study3_pure, "results_moldes_Study3_pure.csv", row.names=FALSE)
+write.csv(best_models_Study3_pure, "results_models_Study3_pure.csv", row.names=FALSE)
 write.csv(final_parameters_Study3_pure, "parameters_models_Study3_pure.csv", row.names=FALSE)
 
 results_Study3_mixed <- read_analyzed_models(study_folder="Study 3/mixed_domains")
@@ -527,7 +527,7 @@ best_models_Study3_mixed <- get_best_models(results_Study3_mixed, models_csv="mo
 final_parameters_Study3_mixed <- get_mean_parameters(results_Study3_mixed, best_models_Study3_mixed)
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 setwd('Study 3/mixed_domains')
-write.csv(results_Study3_mixed, "results_moldes_Study3_mixed.csv", row.names=FALSE)
+write.csv(best_models_Study3_mixed, "results_models_Study3_mixed.csv", row.names=FALSE)
 write.csv(final_parameters_Study3_mixed, "parameters_models_Study3_mixed.csv", row.names=FALSE)
 
 
